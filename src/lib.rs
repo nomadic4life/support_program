@@ -24,7 +24,7 @@ pub fn process_instruction(
 
     match instruction {
         Instructions::Initialize => process_initialize_state(program_id, accounts),
-        Instructions::Claim => Ok(()),
+        Instructions::Claim => process_claim(program_id, accounts),
     }
 }
 
@@ -36,24 +36,38 @@ pub enum Instructions {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct StateAccount {
+    pub discriminator: u8,
     pub bump: u8,
     pub height: u8,
-    pub depth: u8,
-    pub value: u64,
+    pub last_depth: u8,
+    pub last_value: u64,
     pub last_slot: u64,
 }
 
 impl StateAccount {
-    pub const LEN: usize = 1 * 3 + 8 * 2;
+    pub const LEN: usize = 1 * 4 + 8 * 2;
+    pub const DISCRIMINATOR: usize = 0;
+
+    pub fn claim(&mut self) -> ProgramResult {
+        let clock = Clock::get()?;
+
+        self.height += 1;
+        self.last_depth = 0;
+        self.last_value += self.last_value * 2;
+        self.last_slot = clock.slot;
+
+        Ok(())
+    }
 }
 
-pub enum Error {
+pub enum ErrorCode {
     AccountNeedsToBeSigner,
     Immutable,
     InvalidStateAccount,
     AccountAlreadyIntialized,
     AccountNotExecutable,
     InvalidSystemAccount,
+    InvalidAccountType,
 }
 
 pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
@@ -61,36 +75,40 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
 
     let signer = next_account_info(accounts_iter)?;
     if !signer.is_signer {
-        return Err(ProgramError::Custom(Error::AccountNeedsToBeSigner as u32));
+        return Err(ProgramError::Custom(
+            ErrorCode::AccountNeedsToBeSigner as u32,
+        ));
     };
 
     if !signer.is_writable {
-        return Err(ProgramError::Custom(Error::Immutable as u32));
+        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
     }
 
     let state_account = next_account_info(accounts_iter)?;
     if !state_account.is_writable {
-        return Err(ProgramError::Custom(Error::Immutable as u32));
+        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
     }
 
     let seeds = &["state".as_bytes()];
     let (account, bump) = Pubkey::find_program_address(seeds, program_id);
 
     if state_account.key != &account {
-        return Err(ProgramError::Custom(Error::InvalidStateAccount as u32));
+        return Err(ProgramError::Custom(ErrorCode::InvalidStateAccount as u32));
     };
 
     if !state_account.data_is_empty() {
-        return Err(ProgramError::Custom(Error::AccountAlreadyIntialized as u32));
+        return Err(ProgramError::Custom(
+            ErrorCode::AccountAlreadyIntialized as u32,
+        ));
     }
 
     let system_program = next_account_info(accounts_iter)?;
     if !system_program.executable {
-        return Err(ProgramError::Custom(Error::AccountNotExecutable as u32));
+        return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
     }
 
     if solana_program::system_program::check_id(system_program.key) {
-        return Err(ProgramError::Custom(Error::InvalidSystemAccount as u32));
+        return Err(ProgramError::Custom(ErrorCode::InvalidSystemAccount as u32));
     }
 
     let size = StateAccount::LEN;
@@ -99,10 +117,11 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
     let clock = Clock::get()?;
 
     let account_data = StateAccount {
+        discriminator: StateAccount::DISCRIMINATOR as u8,
         bump,
         height: 0,
-        depth: 0,
-        value: 0,
+        last_depth: 0,
+        last_value: 0,
         last_slot: clock.slot,
     };
 
@@ -126,6 +145,41 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
     msg!("State Account Initialize!");
 
     ProgramResult::Ok(())
+}
+
+pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+
+    let signer = next_account_info(accounts_iter)?;
+    if !signer.is_signer {
+        return Err(ProgramError::Custom(
+            ErrorCode::AccountNeedsToBeSigner as u32,
+        ));
+    };
+
+    if !signer.is_writable {
+        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    }
+
+    let state_account = next_account_info(accounts_iter)?;
+    if !state_account.is_writable {
+        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    }
+
+    let seeds = &["state".as_bytes()];
+    let (account, _) = Pubkey::find_program_address(seeds, program_id);
+
+    if state_account.key != &account {
+        return Err(ProgramError::Custom(ErrorCode::InvalidStateAccount as u32));
+    };
+
+    let mut account_data = StateAccount::try_from_slice(&mut *state_account.data.borrow_mut())?;
+
+    if account_data.discriminator != StateAccount::DISCRIMINATOR as u8 {
+        return Err(ProgramError::Custom(ErrorCode::InvalidAccountType as u32));
+    }
+
+    account_data.claim()
 }
 
 // lib
@@ -162,6 +216,7 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
 
 //      INPUT
 //      ACCOUNTS
+//          : Signer -> User
 //          : SPL_Token_Program_2022 + Extension?
 //          : SPL_USDC_Token_Program
 //          : USDC_Token_Mint
