@@ -58,12 +58,11 @@ impl StateAccount {
 
     pub fn claim(&mut self) -> ProgramResult {
         let clock = Clock::get()?;
-
         let distance = clock.slot - self.last_slot;
         let depth = distance / StateAccount::TARGET as u64;
 
         let (
-            //
+            // EXTRACTED VALUES
             current_value,
             current_height,
             next_value,
@@ -92,7 +91,7 @@ impl StateAccount {
                 StateAccount::DEFUALT_AMOUNT,
             )
         } else if self.next_height > depth as u8 {
-            let value = self.last_value >> depth;
+            let value = self.next_value >> depth;
             let current_value = value + value * depth / 100;
             let current_height = self.next_height - depth as u8;
             let next_height = current_height + 1;
@@ -106,7 +105,7 @@ impl StateAccount {
                 depth,
             )
         } else {
-            let value = self.last_value >> self.next_height;
+            let value = self.next_value >> self.next_height;
             let current_value = 0;
             let next_value = value + value * depth / 100;
             let current_height = 0;
