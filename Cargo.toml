@@ -1,0 +1,12 @@
+[package]
+name = "fund_support"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+borsh = "1.5.1"
+solana-program = "=1.18.12"
+
+[lib]
+name = "fund_support"
+crate-type = ["cdylib", "lib"]
