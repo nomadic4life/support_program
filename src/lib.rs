@@ -1,21 +1,131 @@
-use solana_program::{
-    account_info::AccountInfo, entrypoint, entrypoint::ProgramResult, msg, pubkey::Pubkey,
-};
-
 use borsh::{BorshDeserialize, BorshSerialize};
+use solana_program::{
+    account_info::{next_account_info, AccountInfo},
+    clock::Clock,
+    entrypoint,
+    entrypoint::ProgramResult,
+    msg,
+    program::invoke,
+    program_error::ProgramError,
+    pubkey::Pubkey,
+    rent::Rent,
+    system_instruction::create_account,
+    sysvar::Sysvar,
+};
 
 entrypoint!(process_instruction);
 
 pub fn process_instruction(
-    _program_id: &Pubkey,
-    _accounts: &[AccountInfo],
-    _instruction_data: &[u8],
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
 ) -> ProgramResult {
-    // log a message to the blockchain
-    msg!("Hello, world!");
+    let instruction = Instructions::try_from_slice(instruction_data)?;
 
-    // gracefully exit the program
-    Ok(())
+    match instruction {
+        Instructions::Initialize => process_initialize_state(program_id, accounts),
+        Instructions::Claim => Ok(()),
+    }
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+pub enum Instructions {
+    Initialize,
+    Claim,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
+pub struct StateAccount {
+    pub bump: u8,
+    pub height: u8,
+    pub depth: u8,
+    pub value: u64,
+    pub last_slot: u64,
+}
+
+impl StateAccount {
+    pub const LEN: usize = 1 * 3 + 8 * 2;
+}
+
+pub enum Error {
+    AccountNeedsToBeSigner,
+    Immutable,
+    InvalidStateAccount,
+    AccountAlreadyIntialized,
+    AccountNotExecutable,
+    InvalidSystemAccount,
+}
+
+pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+
+    let signer = next_account_info(accounts_iter)?;
+    if !signer.is_signer {
+        return Err(ProgramError::Custom(Error::AccountNeedsToBeSigner as u32));
+    };
+
+    if !signer.is_writable {
+        return Err(ProgramError::Custom(Error::Immutable as u32));
+    }
+
+    let state_account = next_account_info(accounts_iter)?;
+    if !state_account.is_writable {
+        return Err(ProgramError::Custom(Error::Immutable as u32));
+    }
+
+    let seeds = &["state".as_bytes()];
+    let (account, bump) = Pubkey::find_program_address(seeds, program_id);
+
+    if state_account.key != &account {
+        return Err(ProgramError::Custom(Error::InvalidStateAccount as u32));
+    };
+
+    if !state_account.data_is_empty() {
+        return Err(ProgramError::Custom(Error::AccountAlreadyIntialized as u32));
+    }
+
+    let system_program = next_account_info(accounts_iter)?;
+    if !system_program.executable {
+        return Err(ProgramError::Custom(Error::AccountNotExecutable as u32));
+    }
+
+    if solana_program::system_program::check_id(system_program.key) {
+        return Err(ProgramError::Custom(Error::InvalidSystemAccount as u32));
+    }
+
+    let size = StateAccount::LEN;
+    let lamports = (Rent::get()?).minimum_balance(size);
+
+    let clock = Clock::get()?;
+
+    let account_data = StateAccount {
+        bump,
+        height: 0,
+        depth: 0,
+        value: 0,
+        last_slot: clock.slot,
+    };
+
+    invoke(
+        &create_account(
+            signer.key,
+            state_account.key,
+            lamports,
+            size as u64,
+            program_id,
+        ),
+        &[
+            signer.clone(),
+            state_account.clone(),
+            system_program.clone(),
+        ],
+    )?;
+
+    account_data.serialize(&mut *state_account.data.borrow_mut())?;
+
+    msg!("State Account Initialize!");
+
+    ProgramResult::Ok(())
 }
 
 // lib
