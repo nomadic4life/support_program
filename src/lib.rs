@@ -38,23 +38,101 @@ pub enum Instructions {
 pub struct StateAccount {
     pub discriminator: u8,
     pub bump: u8,
-    pub height: u8,
-    pub last_depth: u8,
+
+    pub prev_height: u8,
+    pub last_height: u8,
+    pub next_height: u8,
+
     pub last_value: u64,
+    pub next_value: u64,
     pub last_slot: u64,
 }
 
 impl StateAccount {
     pub const LEN: usize = 1 * 4 + 8 * 2;
     pub const DISCRIMINATOR: usize = 0;
+    pub const TARGET: usize = 60 * 1000 * 2 / 400;
+    pub const RESET: u64 = 0;
+    pub const DEFUALT_AMOUNT: u64 = 1;
+    pub const INIT_VALUE: u64 = 1_000_000;
 
     pub fn claim(&mut self) -> ProgramResult {
         let clock = Clock::get()?;
 
-        self.height += 1;
-        self.last_depth = 0;
-        self.last_value += self.last_value * 2;
+        let distance = clock.slot - self.last_slot;
+        let depth = distance / StateAccount::TARGET as u64;
+
+        let (
+            //
+            current_value,
+            current_height,
+            next_value,
+            next_height,
+            transfer_amount,
+        ) = if self.next_height == 0 {
+            let next_height = self.next_height + 1;
+            let next_value = StateAccount::INIT_VALUE;
+
+            (
+                StateAccount::RESET,
+                self.next_height,
+                next_value,
+                next_height,
+                StateAccount::DEFUALT_AMOUNT,
+            )
+        } else if depth == 0 {
+            let next_value = self.next_value * 2;
+            let next_height = self.next_height + 1;
+
+            (
+                self.next_value,
+                self.next_height,
+                next_value,
+                next_height,
+                StateAccount::DEFUALT_AMOUNT,
+            )
+        } else if self.next_height > depth as u8 {
+            let value = self.last_value >> depth;
+            let current_value = value + value * depth / 100;
+            let current_height = self.next_height - depth as u8;
+            let next_height = current_height + 1;
+            let next_value = value * 2;
+
+            (
+                current_value,
+                current_height,
+                next_value,
+                next_height,
+                depth,
+            )
+        } else {
+            let value = self.last_value >> self.next_height;
+            let current_value = 0;
+            let next_value = value + value * depth / 100;
+            let current_height = 0;
+            let next_height = 1;
+
+            (
+                current_value,
+                current_height,
+                next_value,
+                next_height,
+                depth,
+            )
+        };
+
         self.last_slot = clock.slot;
+        self.last_height = current_height;
+        self.last_value = current_value;
+
+        self.next_height = next_height;
+        self.next_value = next_value;
+        self.prev_height = self.next_height;
+
+        // if last_value != 0
+        // transfer current value
+
+        // transfer claim token
 
         Ok(())
     }
@@ -119,9 +197,11 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
     let account_data = StateAccount {
         discriminator: StateAccount::DISCRIMINATOR as u8,
         bump,
-        height: 0,
-        last_depth: 0,
+        prev_height: 0,
+        last_height: 0,
+        next_height: 0,
         last_value: 0,
+        next_value: 0,
         last_slot: clock.slot,
     };
 
