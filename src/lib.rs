@@ -7,11 +7,13 @@ use solana_program::{
     msg,
     program::invoke,
     program_error::ProgramError,
+    program_pack::Pack,
     pubkey::Pubkey,
     rent::Rent,
     system_instruction::create_account,
     sysvar::Sysvar,
 };
+use spl_token_2022::{instruction::initialize_mint, state};
 
 entrypoint!(process_instruction);
 
@@ -165,6 +167,7 @@ pub enum ErrorCode {
     AccountNotExecutable,
     InvalidSystemAccount,
     InvalidAccountType,
+    Invalid,
 }
 
 pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
@@ -198,6 +201,10 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
             ErrorCode::AccountAlreadyIntialized as u32,
         ));
     }
+
+    let token_program = next_account_info(accounts_iter)?;
+    let token_mint = next_account_info(accounts_iter)?;
+    let authority = next_account_info(accounts_iter)?;
 
     let system_program = next_account_info(accounts_iter)?;
     if !system_program.executable {
@@ -237,6 +244,32 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
             state_account.clone(),
             system_program.clone(),
         ],
+    )?;
+
+    let size = state::Mint::LEN;
+    let lamports = (Rent::get()?).minimum_balance(size);
+
+    invoke(
+        &create_account(
+            signer.key,
+            token_mint.key,
+            lamports,
+            size as u64,
+            token_program.key,
+        ),
+        &[signer.clone(), token_mint.clone(), system_program.clone()],
+    )?;
+
+    let decimals = 9;
+    invoke(
+        &initialize_mint(
+            &token_program.key,
+            &token_mint.key,
+            &authority.key,
+            Some(&authority.key),
+            decimals,
+        )?,
+        &[signer.clone(), token_mint.clone(), token_program.clone()],
     )?;
 
     account_data.serialize(&mut *state_account.data.borrow_mut())?;
