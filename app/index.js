@@ -15,7 +15,11 @@ console.log("sanity check")
 // console.log(web3)
 
 const programId = new PublicKey("Bsygg6pgkUnupUAw1QcofEqUNEhYpkn7rZ3u3SUbDvAq");
+
+// spl-token-2022
 const tokenProgramId = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+// spl-token
 // const tokenProgramId = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 
@@ -40,7 +44,9 @@ const run = async () => {
         Buffer.from("state")
     ], programId)
 
-    // const tokenMint = Keypair.generate();
+    const [tokenAutority] = PublicKey.findProgramAddressSync([
+        Buffer.from("token-authority")
+    ], programId)
 
     const [tokenMint] = PublicKey.findProgramAddressSync([
         Buffer.from("token-mint")
@@ -72,15 +78,10 @@ const run = async () => {
                 isWritable: true,
                 pubkey: tokenMint,
             },
-            // {
-            //     isSigner: false,
-            //     isWritable: true,
-            //     pubkey: tokenMint.publicKey,
-            // },
             {
                 isSigner: false,
                 isWritable: false,
-                pubkey: keypair.publicKey,
+                pubkey: tokenAutority,
             },
             {
                 isSigner: false,
@@ -93,14 +94,12 @@ const run = async () => {
 
     transaction.add(instruction);
     transaction.sign(keypair);
-    // transaction.feePayer = keypair.publicKey;
-
 
     console.log("SIGNER: ", keypair, keypair.publicKey, keypair.publicKey.toString());
     console.log(transaction);
 
 
-    const sig = await connection.sendTransaction(transaction, [keypair], "finalized");
+    const sig = await connection.sendTransaction(transaction, [keypair]);
     // const sig = await sendAndConfirmRawTransaction(connection, transaction, [keypair]);
     console.log({ sig })
 }
