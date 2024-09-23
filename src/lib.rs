@@ -28,8 +28,15 @@ pub fn process_instruction(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    let (instruction, data) = match TransferHookInstruction::unpack(instruction_data) {
-        Ok(instruction) => match instruction {
+    let code = u64::from_be_bytes(
+        instruction_data[..8]
+            .try_into()
+            .expect("slice with incorrect length"),
+    );
+
+    let (instruction, data) = match code {
+        0 => (Instructions::try_from_slice(&instruction_data[8..])?, None),
+        _ => match TransferHookInstruction::unpack(instruction_data)? {
             // Execute
             TransferHookInstruction::Execute { amount } => (Instructions::Execute { amount }, None),
 
@@ -49,9 +56,6 @@ pub fn process_instruction(
                 Some(extra_account_metas),
             ),
         },
-
-        // Normal Program Default Instructions
-        _ => (Instructions::try_from_slice(instruction_data)?, None),
     };
 
     match instruction {
