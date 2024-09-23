@@ -15,8 +15,10 @@ import {
     // getOrCreateAssociatedTokenAccount,
     getAssociatedTokenAddressSync,
     createAssociatedTokenAccountInstruction,
+    createTransferCheckedWithTransferHookInstruction,
     TOKEN_2022_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID,
+    createTransferCheckedInstruction,
 } from "@solana/spl-token";
 
 
@@ -43,20 +45,25 @@ const run = async () => {
 
     const [stateAccount] = PublicKey.findProgramAddressSync([
         Buffer.from("state")
-    ], programId)
+    ], programId);
 
-    const [tokenAutority] = PublicKey.findProgramAddressSync([
+    const [tokenAuthority] = PublicKey.findProgramAddressSync([
         Buffer.from("token-authority")
-    ], programId)
+    ], programId);
 
     const [tokenMint] = PublicKey.findProgramAddressSync([
         Buffer.from("token-mint")
-    ], programId)
+    ], programId);
+
+    const [metaList] = PublicKey.findProgramAddressSync([
+        Buffer.from("extra-account-metas"),
+        tokenMint.toBuffer(),
+    ], programId);
 
 
 
     const latestBlockhash = await connection.getLatestBlockhash();
-    const signature = await connection.requestAirdrop(keypair.publicKey, LAMPORTS_PER_SOL);
+    const signature = await connection.requestAirdrop(keypair.publicKey, 10 * LAMPORTS_PER_SOL);
     const response = await connection.confirmTransaction({
         signature,
         ...latestBlockhash,
@@ -67,10 +74,14 @@ const run = async () => {
         keypair,
         stateAccount,
         tokenMint,
-        tokenAutority,
+        tokenAuthority,
     );
 
-
+    await create_meta_list(
+        keypair,
+        tokenMint,
+        metaList,
+    );
 
     const tokenAccounts = await Promise.all([
         new Promise(async (resolve, reject) => {
@@ -98,13 +109,31 @@ const run = async () => {
         }),
     ]);
 
-
-    mintTokens(
+    await mintTokens(
         keypair,
         tokenAccounts[0].tokenAddress,
-        tokenAutority,
+        tokenAuthority,
         tokenMint,
+    );
+
+    await transfer_token(
+        connection,
+        tokenAccounts[0].tokenAddress,
+        tokenMint,
+        tokenAccounts[1].tokenAddress,
+        tokenAccounts[0].user,
+        BigInt(1_000_000_000),
+        9,
     )
+
+    // await transfer_test(
+    //     tokenAccounts[0].tokenAddress,
+    //     tokenMint,
+    //     tokenAccounts[1].tokenAddress,
+    //     tokenAccounts[0].user,
+    //     BigInt(1_000_000_000),
+    //     9,
+    // )
 
 
 }
@@ -113,7 +142,7 @@ const init = async (
     payer,
     stateAccount,
     tokenMint,
-    tokenAutority,
+    tokenAuthority,
 ) => {
     const latestBlockhash = await connection.getLatestBlockhash();
     const instruction = new TransactionInstruction({
@@ -129,7 +158,6 @@ const init = async (
                 isWritable: true,
                 pubkey: stateAccount,
             },
-
             {
                 isSigner: false,
                 isWritable: false,
@@ -143,7 +171,7 @@ const init = async (
             {
                 isSigner: false,
                 isWritable: false,
-                pubkey: tokenAutority,
+                pubkey: tokenAuthority,
             },
             {
                 isSigner: false,
@@ -160,12 +188,63 @@ const init = async (
 
 
     let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
-        commitment: "confirmed",
+        commitment: "finalized",
     });
     console.log({ name: "init", sig });
 }
 
+const create_meta_list = async (
+    payer,
+    tokenMint,
+    metaList,
+) => {
+    const latestBlockhash = await connection.getLatestBlockhash();
+    const instruction = new TransactionInstruction({
+        data: [0, 0, 0, 0, 0, 0, 0, 0, 4],
+        keys: [
+            {
+                isSigner: true,
+                isWritable: true,
+                pubkey: payer.publicKey,
+            },
+            {
+                isSigner: false,
+                isWritable: true,
+                pubkey: tokenMint,
+            },
+            {
+                isSigner: false,
+                isWritable: true,
+                pubkey: metaList,
+            },
+            {
+                isSigner: false,
+                isWritable: false,
+                pubkey: SystemProgram.programId,
+            },
+        ],
+        programId,
+    })
+
+    const transaction = new Transaction({ ...latestBlockhash });
+    transaction.add(instruction);
+    transaction.sign(payer);
+
+
+    let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
+        commitment: "finalized",
+    });
+    console.log({ name: "meta list", sig });
+}
+
 const createTokenAccount = async (payer, owner, tokenMint) => {
+    const latestBlockhash = await connection.getLatestBlockhash();
+    const signature = await connection.requestAirdrop(owner.publicKey, LAMPORTS_PER_SOL);
+    const response = await connection.confirmTransaction({
+        signature,
+        ...latestBlockhash,
+    });
+
     const associatedToken = getAssociatedTokenAddressSync(
         tokenMint,
         owner.publicKey,
@@ -174,7 +253,6 @@ const createTokenAccount = async (payer, owner, tokenMint) => {
         ASSOCIATED_TOKEN_PROGRAM_ID,
     );
 
-    const latestBlockhash = await connection.getLatestBlockhash();
     const transaction = new Transaction({ ...latestBlockhash })
         .add(
             createAssociatedTokenAccountInstruction(
@@ -190,7 +268,10 @@ const createTokenAccount = async (payer, owner, tokenMint) => {
     let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
         commitment: "finalized",
     });
-    console.log({ name: 'token account', sig });
+
+
+
+    console.log({ name: 'token account', sig, response });
 
     return associatedToken
 }
@@ -198,7 +279,7 @@ const createTokenAccount = async (payer, owner, tokenMint) => {
 const mintTokens = async (
     payer,
     receipent,
-    tokenAutority,
+    tokenAuthority,
     tokenMint,
 ) => {
 
@@ -224,7 +305,7 @@ const mintTokens = async (
             {
                 isSigner: false,
                 isWritable: false,
-                pubkey: tokenAutority,
+                pubkey: tokenAuthority,
             },
             {
                 isSigner: false,
@@ -239,10 +320,78 @@ const mintTokens = async (
     transaction.add(instruction);
 
     let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
-        commitment: "confirmed",
+        commitment: "finalized",
     });
     console.log({ name: 'mint tokens', sig })
 
+}
+
+const transfer_token = async (
+    connection,
+    source,
+    tokenMint,
+    destination,
+    owner,
+    amount,
+    decimal
+) => {
+
+    const latestBlockhash = await connection.getLatestBlockhash();
+    const instruction = await createTransferCheckedWithTransferHookInstruction(
+        connection,
+        source,
+        tokenMint,
+        destination,
+        owner.publicKey,
+        amount,
+        decimal,
+        [],
+        "finalized",// ? finalized | confirmed?
+        TOKEN_2022_PROGRAM_ID,
+    );
+
+    console.log(instruction)
+
+    const transaction = new Transaction({ ...latestBlockhash })
+        .add(instruction);
+
+    let sig = await sendAndConfirmTransaction(connection, transaction, [owner], {
+        commitment: "finalized",
+        // skipPreflight: true,
+    });
+    console.log({ name: 'token transfer', sig });
+
+}
+
+const transfer_test = async (
+    source,
+    tokenMint,
+    destination,
+    owner,
+    amount,
+    decimal
+) => {
+    const latestBlockhash = await connection.getLatestBlockhash();
+    const instruction = createTransferCheckedInstruction(
+        source,
+        tokenMint,
+        destination,
+        owner.publicKey,
+        amount,
+        decimal,
+        [],
+        TOKEN_2022_PROGRAM_ID,
+    );
+
+    console.log(instruction)
+
+    const transaction = new Transaction({ ...latestBlockhash })
+        .add(instruction);
+
+    let sig = await sendAndConfirmTransaction(connection, transaction, [owner], {
+        commitment: "finalized",
+    });
+    console.log({ name: 'token transfer', sig });
 }
 
 run()

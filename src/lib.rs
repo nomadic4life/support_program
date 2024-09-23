@@ -13,12 +13,12 @@ use solana_program::{
     system_instruction::create_account,
     sysvar::Sysvar,
 };
-use spl_tlv_account_resolution::account::{self, ExtraAccountMeta};
+use spl_tlv_account_resolution::{account::ExtraAccountMeta, state::ExtraAccountMetaList};
 use spl_token_2022::{
     instruction::{initialize_mint2, mint_to_checked},
     state,
 };
-use spl_transfer_hook_interface::instruction::TransferHookInstruction;
+use spl_transfer_hook_interface::instruction::{ExecuteInstruction, TransferHookInstruction};
 
 const STATE_SEED: &str = "state";
 const TOKEN_MINT_SEED: &str = "token-mint";
@@ -68,6 +68,9 @@ pub fn process_instruction(
 
     match instruction {
         Instructions::Initialize => process_initialize(program_id, accounts),
+        Instructions::InitializeExtraAccountMetaList => {
+            process_initialize_extra_account_meta_list(program_id, accounts)
+        }
         Instructions::MintTokens => process_mint_tokens(program_id, accounts),
         Instructions::Claim => process_claim(program_id, accounts),
 
@@ -333,6 +336,7 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
 
     // adding 152 for the extension + but why 152?
     let size = state::Mint::LEN + 152;
+    // let size = state::Mint::LEN;
     let lamports = (Rent::get()?).minimum_balance(size);
 
     // create the account -> mint_token
@@ -351,9 +355,9 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     // create the token hook relation
     invoke(
         &spl_token_2022::extension::transfer_hook::instruction::initialize(
-            &token_program.key,
+            token_program.key,
             token_mint.key,
-            None,
+            Some(authority.key.clone()),
             Some(program_id.clone()),
         )?,
         &[token_mint.clone()],
@@ -363,10 +367,10 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     let decimals = 9;
     invoke(
         &initialize_mint2(
-            &token_program.key,
-            &token_mint.key,
-            &authority.key,
-            Some(&authority.key),
+            token_program.key,
+            token_mint.key,
+            authority.key,
+            Some(authority.key),
             decimals,
         )?,
         &[token_mint.clone()],
@@ -377,6 +381,46 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     msg!("State Account Initialize!");
 
     ProgramResult::Ok(())
+}
+
+pub fn process_initialize_extra_account_meta_list(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+
+    let signer = next_account_info(accounts_iter)?;
+    let token_mint = next_account_info(accounts_iter)?;
+    let extra_account_meta_list = next_account_info(accounts_iter)?;
+    let _system_program = next_account_info(accounts_iter);
+
+    let account_metas = vec![];
+    let account_size = ExtraAccountMetaList::size_of(account_metas.len())? as u64;
+    let lamports = (Rent::get()?).minimum_balance(account_size as usize);
+
+    let (_account, bump) = Pubkey::find_program_address(
+        &[b"extra-account-metas", token_mint.key.as_ref()],
+        program_id,
+    );
+
+    invoke_signed(
+        &create_account(
+            signer.key,
+            extra_account_meta_list.key,
+            lamports,
+            account_size as u64,
+            program_id,
+        ),
+        &[signer.clone(), extra_account_meta_list.clone()],
+        &[&[b"extra-account-metas", token_mint.key.as_ref(), &[bump][..]]],
+    )?;
+
+    ExtraAccountMetaList::init::<ExecuteInstruction>(
+        &mut extra_account_meta_list.try_borrow_mut_data()?,
+        &account_metas,
+    )?;
+
+    Ok(())
 }
 
 pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
@@ -428,9 +472,9 @@ pub fn process_mint_tokens(program_id: &Pubkey, accounts: &[AccountInfo]) -> Pro
     let seeds = &[TOKEN_AUTHORITY_SEED.as_bytes()];
     let (_account, bump) = Pubkey::find_program_address(seeds, program_id);
 
-    // if authority.key != &account {
-    //     return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
-    // };
+    if authority.key != &_account {
+        return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
+    };
 
     // if !token_program.executable {
     //     return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
@@ -459,6 +503,11 @@ pub fn process_mint_tokens(program_id: &Pubkey, accounts: &[AccountInfo]) -> Pro
 }
 
 pub fn process_transfer_token(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    msg!("TOKEN TRANSFERED, IT WORKS!");
+
+    // if true {
+    //     return Err(ProgramError::Custom(1));
+    // }
     Ok(())
 }
 
