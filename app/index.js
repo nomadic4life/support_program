@@ -6,13 +6,19 @@ import {
     Transaction,
     TransactionInstruction,
     SystemProgram,
-    sendAndConfirmRawTransaction,
+    // sendAndConfirmRawTransaction,
+    sendAndConfirmTransaction,
     // TransactionConfirmationStrategy,
-} from "@solana/web3.js"
-// const web3 = require("@solana/web3.js")
+} from "@solana/web3.js";
 
-console.log("sanity check")
-// console.log(web3)
+import {
+    // getOrCreateAssociatedTokenAccount,
+    getAssociatedTokenAddressSync,
+    createAssociatedTokenAccountInstruction,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
+
 
 const programId = new PublicKey("Bsygg6pgkUnupUAw1QcofEqUNEhYpkn7rZ3u3SUbDvAq");
 
@@ -23,22 +29,17 @@ const tokenProgramId = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuE
 // const tokenProgramId = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 
-const keypair = Keypair.generate();
+// ---------------------
 
 const connection = new Connection("http://127.0.0.1:8899")
 
-console.log(programId, tokenProgramId)
+const keypair = Keypair.generate();
+const user1 = Keypair.generate();
+const user2 = Keypair.generate();
+
+
 
 const run = async () => {
-
-    const latestBlockhash = await connection.getLatestBlockhash();
-    const signature = await connection.requestAirdrop(keypair.publicKey, LAMPORTS_PER_SOL);
-    const response = await connection.confirmTransaction({
-        signature,
-        ...latestBlockhash,
-    });
-
-    console.log({ response })
 
     const [stateAccount] = PublicKey.findProgramAddressSync([
         Buffer.from("state")
@@ -52,15 +53,76 @@ const run = async () => {
         Buffer.from("token-mint")
     ], programId)
 
-    const transaction = new Transaction({ ...latestBlockhash });
 
+
+    const latestBlockhash = await connection.getLatestBlockhash();
+    const signature = await connection.requestAirdrop(keypair.publicKey, LAMPORTS_PER_SOL);
+    const response = await connection.confirmTransaction({
+        signature,
+        ...latestBlockhash,
+    });
+
+
+    await init(
+        keypair,
+        stateAccount,
+        tokenMint,
+        tokenAutority,
+    );
+
+
+
+    const tokenAccounts = await Promise.all([
+        new Promise(async (resolve, reject) => {
+            let tokenAddress = await createTokenAccount(
+                keypair,
+                user1,
+                tokenMint,
+            )
+
+            resolve({
+                tokenAddress, user: user1
+            })
+        }),
+
+        new Promise(async (resolve, reject) => {
+            let tokenAddress = await createTokenAccount(
+                keypair,
+                user2,
+                tokenMint,
+            )
+
+            resolve({
+                tokenAddress, user: user2
+            })
+        }),
+    ]);
+
+
+    mintTokens(
+        keypair,
+        tokenAccounts[0].tokenAddress,
+        tokenAutority,
+        tokenMint,
+    )
+
+
+}
+
+const init = async (
+    payer,
+    stateAccount,
+    tokenMint,
+    tokenAutority,
+) => {
+    const latestBlockhash = await connection.getLatestBlockhash();
     const instruction = new TransactionInstruction({
-        data: [0],
+        data: [0, 0, 0, 0, 0, 0, 0, 0, 0],
         keys: [
             {
                 isSigner: true,
                 isWritable: true,
-                pubkey: keypair.publicKey,
+                pubkey: payer.publicKey,
             },
             {
                 isSigner: false,
@@ -71,7 +133,7 @@ const run = async () => {
             {
                 isSigner: false,
                 isWritable: false,
-                pubkey: tokenProgramId,
+                pubkey: TOKEN_2022_PROGRAM_ID,
             },
             {
                 isSigner: false,
@@ -90,20 +152,98 @@ const run = async () => {
             },
         ],
         programId,
-    });
+    })
 
+    const transaction = new Transaction({ ...latestBlockhash });
     transaction.add(instruction);
-    transaction.sign(keypair);
-
-    console.log("SIGNER: ", keypair, keypair.publicKey, keypair.publicKey.toString());
-    console.log(transaction);
+    transaction.sign(payer);
 
 
-    const sig = await connection.sendTransaction(transaction, [keypair]);
-    // const sig = await sendAndConfirmRawTransaction(connection, transaction, [keypair]);
-    console.log({ sig })
+    let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
+        commitment: "confirmed",
+    });
+    console.log({ name: "init", sig });
 }
 
+const createTokenAccount = async (payer, owner, tokenMint) => {
+    const associatedToken = getAssociatedTokenAddressSync(
+        tokenMint,
+        owner.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+
+    const latestBlockhash = await connection.getLatestBlockhash();
+    const transaction = new Transaction({ ...latestBlockhash })
+        .add(
+            createAssociatedTokenAccountInstruction(
+                payer.publicKey,
+                associatedToken,
+                owner.publicKey,
+                tokenMint,
+                TOKEN_2022_PROGRAM_ID,
+                ASSOCIATED_TOKEN_PROGRAM_ID
+            )
+        );
+
+    let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
+        commitment: "finalized",
+    });
+    console.log({ name: 'token account', sig });
+
+    return associatedToken
+}
+
+const mintTokens = async (
+    payer,
+    receipent,
+    tokenAutority,
+    tokenMint,
+) => {
+
+    const latestBlockhash = await connection.getLatestBlockhash();
+    const instruction = new TransactionInstruction({
+        data: [0, 0, 0, 0, 0, 0, 0, 0, 1],
+        keys: [
+            {
+                isSigner: true,
+                isWritable: true,
+                pubkey: payer.publicKey,
+            },
+            {
+                isSigner: false,
+                isWritable: true,
+                pubkey: receipent,
+            },
+            {
+                isSigner: false,
+                isWritable: true,
+                pubkey: tokenMint,
+            },
+            {
+                isSigner: false,
+                isWritable: false,
+                pubkey: tokenAutority,
+            },
+            {
+                isSigner: false,
+                isWritable: false,
+                pubkey: TOKEN_2022_PROGRAM_ID,
+            },
+        ],
+        programId,
+    })
+
+    const transaction = new Transaction({ ...latestBlockhash });
+    transaction.add(instruction);
+
+    let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
+        commitment: "confirmed",
+    });
+    console.log({ name: 'mint tokens', sig })
+
+}
 
 run()
 

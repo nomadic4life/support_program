@@ -13,8 +13,11 @@ use solana_program::{
     system_instruction::create_account,
     sysvar::Sysvar,
 };
-use spl_tlv_account_resolution::account::ExtraAccountMeta;
-use spl_token_2022::{instruction::initialize_mint2, state};
+use spl_tlv_account_resolution::account::{self, ExtraAccountMeta};
+use spl_token_2022::{
+    instruction::{initialize_mint2, mint_to_checked},
+    state,
+};
 use spl_transfer_hook_interface::instruction::TransferHookInstruction;
 
 const STATE_SEED: &str = "state";
@@ -34,8 +37,13 @@ pub fn process_instruction(
             .expect("slice with incorrect length"),
     );
 
+    msg!("CODE: {}, {}", code, instruction_data[8]);
+
     let (instruction, data) = match code {
-        0 => (Instructions::try_from_slice(&instruction_data[8..])?, None),
+        // Normal Instructions
+        0 => (Instructions::try_from_slice(&[instruction_data[8]])?, None),
+
+        // Transfer Hook Instructions
         _ => match TransferHookInstruction::unpack(instruction_data)? {
             // Execute
             TransferHookInstruction::Execute { amount } => (Instructions::Execute { amount }, None),
@@ -60,6 +68,7 @@ pub fn process_instruction(
 
     match instruction {
         Instructions::Initialize => process_initialize(program_id, accounts),
+        Instructions::MintTokens => process_mint_tokens(program_id, accounts),
         Instructions::Claim => process_claim(program_id, accounts),
 
         // how to prevent anyone other than the token program to execute this instruction?
@@ -71,6 +80,7 @@ pub fn process_instruction(
 #[derive(BorshSerialize, BorshDeserialize)]
 pub enum Instructions {
     Initialize,
+    MintTokens,
     Claim,
     Execute { amount: u64 },
     InitializeExtraAccountMetaList,
@@ -405,11 +415,76 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
     account_data.claim(amount)
 }
 
+// temporary help function -> minting will be down in the process_claim in final version
+pub fn process_mint_tokens(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+
+    let _signer = next_account_info(accounts_iter)?;
+    let receipent = next_account_info(accounts_iter)?;
+    let token_mint = next_account_info(accounts_iter)?;
+    let authority = next_account_info(accounts_iter)?;
+    let token_program = next_account_info(accounts_iter)?;
+
+    let seeds = &[TOKEN_AUTHORITY_SEED.as_bytes()];
+    let (_account, bump) = Pubkey::find_program_address(seeds, program_id);
+
+    // if authority.key != &account {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
+    // };
+
+    // if !token_program.executable {
+    //     return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
+    // }
+
+    // if !token_mint.is_writable {
+    //     return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    // }
+
+    let amount = 1_000_000_000;
+    let decimals = 9;
+
+    invoke_signed(
+        &mint_to_checked(
+            token_program.key,
+            token_mint.key,
+            receipent.key,
+            authority.key,
+            &[],
+            amount,
+            decimals,
+        )?,
+        &[token_mint.clone(), receipent.clone(), authority.clone()][..],
+        &[&[TOKEN_AUTHORITY_SEED.as_bytes(), &[bump][..]]],
+    )
+}
+
+pub fn process_transfer_token(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    Ok(())
+}
+
+// curently working on
 pub fn process_execute(
     _program_id: &Pubkey,
     _accounts: &[AccountInfo],
     _amount: u64,
 ) -> ProgramResult {
+    // source
+    // destination
+
+    // transfer 1
+    // any source -> program escrow destination
+    //  tax is applied to amount and remains in escrow
+    //  remaining is recorded to the intended receipent
+
+    //  transfer 2
+    //  program escrow source -> tax vault destination
+    //  must be executed before final transaction
+    //  anyone can exuecte transaction, done from program
+
+    // transfer 3
+    //  program escrow source -> receipent destenation
+    //  final transaction
+    //  anyone can execute transaction, done from program
     Ok(())
 }
 
