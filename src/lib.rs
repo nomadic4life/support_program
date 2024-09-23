@@ -13,8 +13,9 @@ use solana_program::{
     system_instruction::create_account,
     sysvar::Sysvar,
 };
-// use spl_token::instruction::initialize_mint2;
+use spl_tlv_account_resolution::account::ExtraAccountMeta;
 use spl_token_2022::{instruction::initialize_mint2, state};
+use spl_transfer_hook_interface::instruction::TransferHookInstruction;
 
 const STATE_SEED: &str = "state";
 const TOKEN_MINT_SEED: &str = "token-mint";
@@ -27,11 +28,39 @@ pub fn process_instruction(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    let instruction = Instructions::try_from_slice(instruction_data)?;
+    let (instruction, data) = match TransferHookInstruction::unpack(instruction_data) {
+        Ok(instruction) => match instruction {
+            // Execute
+            TransferHookInstruction::Execute { amount } => (Instructions::Execute { amount }, None),
+
+            // InitializeExtraAccountMetaList
+            TransferHookInstruction::InitializeExtraAccountMetaList {
+                extra_account_metas,
+            } => (
+                Instructions::InitializeExtraAccountMetaList,
+                Some(extra_account_metas),
+            ),
+
+            // UpdateExtraAccountMetaList
+            TransferHookInstruction::UpdateExtraAccountMetaList {
+                extra_account_metas,
+            } => (
+                Instructions::UpdateExtraAccountMetaList,
+                Some(extra_account_metas),
+            ),
+        },
+
+        // Normal Program Default Instructions
+        _ => (Instructions::try_from_slice(instruction_data)?, None),
+    };
 
     match instruction {
-        Instructions::Initialize => process_initialize_state(program_id, accounts),
+        Instructions::Initialize => process_initialize(program_id, accounts),
         Instructions::Claim => process_claim(program_id, accounts),
+
+        // how to prevent anyone other than the token program to execute this instruction?
+        Instructions::Execute { amount } => process_execute(program_id, accounts, amount),
+        _ => fallback(program_id, accounts, data),
     }
 }
 
@@ -39,6 +68,9 @@ pub fn process_instruction(
 pub enum Instructions {
     Initialize,
     Claim,
+    Execute { amount: u64 },
+    InitializeExtraAccountMetaList,
+    UpdateExtraAccountMetaList,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
@@ -80,8 +112,8 @@ impl StateAccount {
             current_height,
             next_value,
             next_height,
-            transfer_amount,
-            pool_amount,
+            _transfer_amount,
+            _pool_amount,
         ) = if self.next_height == 0 {
             let next_height = self.next_height + 1;
             let next_value = StateAccount::INIT_VALUE;
@@ -178,7 +210,7 @@ pub enum ErrorCode {
     InvalidTokenProgram,
 }
 
-pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
 
     let signer = next_account_info(accounts_iter)?;
@@ -249,6 +281,11 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
     // if &solana_program::system_program::ID == system_program.key {
     //     return Err(ProgramError::Custom(ErrorCode::InvalidSystemProgram as u32));
     // }
+
+    // using system_program that is passed in, want to use from dependency, but doesn't work
+    if authority.owner != system_program.key {
+        return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
+    }
 
     let clock = Clock::get()?;
 
@@ -364,21 +401,21 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
     account_data.claim(amount)
 }
 
-pub fn initialize_hook(
-    token_program_id: &Pubkey,
-    mint_info: &AccountInfo,
-    authority: Option<Pubkey>,
-    transfer_hook_program_id: Option<Pubkey>,
+pub fn process_execute(
+    _program_id: &Pubkey,
+    _accounts: &[AccountInfo],
+    _amount: u64,
 ) -> ProgramResult {
-    invoke(
-        &spl_token_2022::extension::transfer_hook::instruction::initialize(
-            token_program_id,
-            mint_info.key,
-            authority,
-            transfer_hook_program_id,
-        )?,
-        &[mint_info.clone()],
-    )
+    Ok(())
+}
+
+// curently working on
+pub fn fallback(
+    _program_id: &Pubkey,
+    _accounts: &[AccountInfo],
+    _data: Option<Vec<ExtraAccountMeta>>,
+) -> ProgramResult {
+    Ok(())
 }
 
 // lib
