@@ -5,7 +5,7 @@ use solana_program::{
     entrypoint,
     entrypoint::ProgramResult,
     msg,
-    program::invoke,
+    program::{invoke, invoke_signed},
     program_error::ProgramError,
     program_pack::Pack,
     pubkey::Pubkey,
@@ -13,7 +13,12 @@ use solana_program::{
     system_instruction::create_account,
     sysvar::Sysvar,
 };
-use spl_token_2022::{instruction::initialize_mint, state};
+// use spl_token::instruction::initialize_mint2;
+use spl_token_2022::{instruction::initialize_mint2, state};
+
+const STATE_SEED: &str = "state";
+const TOKEN_MINT_SEED: &str = "token-mint";
+const TOKEN_AUTHORITY_SEED: &str = "token-authority";
 
 entrypoint!(process_instruction);
 
@@ -51,7 +56,7 @@ pub struct StateAccount {
 }
 
 impl StateAccount {
-    pub const LEN: usize = 1 * 4 + 8 * 2;
+    pub const LEN: usize = 1 * 5 + 8 * 3;
     pub const DISCRIMINATOR: usize = 0;
     pub const TARGET: usize = 60 * 1000 * 2 / 400;
     pub const RESET: u64 = 0;
@@ -165,9 +170,12 @@ pub enum ErrorCode {
     InvalidStateAccount,
     AccountAlreadyIntialized,
     AccountNotExecutable,
-    InvalidSystemAccount,
+    InvalidSystemProgram,
     InvalidAccountType,
     Invalid,
+    InvalidMintAuthority,
+    InvalidTokenMint,
+    InvalidTokenProgram,
 }
 
 pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
@@ -189,8 +197,8 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
         return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
     }
 
-    let seeds = &["state".as_bytes()];
-    let (account, bump) = Pubkey::find_program_address(seeds, program_id);
+    let seeds = &[STATE_SEED.as_bytes()];
+    let (account, state_bump) = Pubkey::find_program_address(seeds, program_id);
 
     if state_account.key != &account {
         return Err(ProgramError::Custom(ErrorCode::InvalidStateAccount as u32));
@@ -203,35 +211,64 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
     }
 
     let token_program = next_account_info(accounts_iter)?;
+    if !token_program.executable {
+        return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
+    }
+
+    // why this doesn't work?
+    // if token_program.key == &spl_token_2022::ID {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidTokenProgram as u32));
+    // }
+
     let token_mint = next_account_info(accounts_iter)?;
+    if !token_mint.is_writable {
+        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    }
+
+    let seeds = &[TOKEN_MINT_SEED.as_bytes()];
+    let (account, mint_bump) = Pubkey::find_program_address(seeds, program_id);
+    if token_mint.key != &account {
+        return Err(ProgramError::Custom(ErrorCode::InvalidTokenMint as u32));
+    };
+
     let authority = next_account_info(accounts_iter)?;
+
+    let seeds = &[TOKEN_AUTHORITY_SEED.as_bytes()];
+    let (account, _) = Pubkey::find_program_address(seeds, program_id);
+
+    if authority.key != &account {
+        return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
+    };
 
     let system_program = next_account_info(accounts_iter)?;
     if !system_program.executable {
         return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
     }
 
-    if solana_program::system_program::check_id(system_program.key) {
-        return Err(ProgramError::Custom(ErrorCode::InvalidSystemAccount as u32));
-    }
-
-    let size = StateAccount::LEN;
-    let lamports = (Rent::get()?).minimum_balance(size);
+    // some reason I can't get this to work properly
+    // if &solana_program::system_program::ID == system_program.key {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidSystemProgram as u32));
+    // }
 
     let clock = Clock::get()?;
 
     let account_data = StateAccount {
         discriminator: StateAccount::DISCRIMINATOR as u8,
-        bump,
+        bump: state_bump,
         prev_height: 0,
         last_height: 0,
         next_height: 0,
+
         last_value: 0,
         next_value: 0,
         last_slot: clock.slot,
     };
 
-    invoke(
+    let size = StateAccount::LEN;
+    let lamports = (Rent::get()?).minimum_balance(size);
+
+    // create the state account
+    invoke_signed(
         &create_account(
             signer.key,
             state_account.key,
@@ -239,17 +276,16 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
             size as u64,
             program_id,
         ),
-        &[
-            signer.clone(),
-            state_account.clone(),
-            system_program.clone(),
-        ],
+        &[signer.clone(), state_account.clone()],
+        &[&[STATE_SEED.as_bytes(), &[state_bump]]],
     )?;
 
-    let size = state::Mint::LEN;
+    // adding 152 for the extension + but why 152?
+    let size = state::Mint::LEN + 152;
     let lamports = (Rent::get()?).minimum_balance(size);
 
-    invoke(
+    // create the account -> mint_token
+    invoke_signed(
         &create_account(
             signer.key,
             token_mint.key,
@@ -257,19 +293,32 @@ pub fn process_initialize_state(program_id: &Pubkey, accounts: &[AccountInfo]) -
             size as u64,
             token_program.key,
         ),
-        &[signer.clone(), token_mint.clone(), system_program.clone()],
+        &[signer.clone(), token_mint.clone()],
+        &[&[TOKEN_MINT_SEED.as_bytes(), &[mint_bump]]],
     )?;
 
+    // create the token hook relation
+    invoke(
+        &spl_token_2022::extension::transfer_hook::instruction::initialize(
+            &token_program.key,
+            token_mint.key,
+            None,
+            Some(program_id.clone()),
+        )?,
+        &[token_mint.clone()],
+    )?;
+
+    // initialize the token_mint
     let decimals = 9;
     invoke(
-        &initialize_mint(
+        &initialize_mint2(
             &token_program.key,
             &token_mint.key,
             &authority.key,
             Some(&authority.key),
             decimals,
         )?,
-        &[signer.clone(), token_mint.clone(), token_program.clone()],
+        &[token_mint.clone()],
     )?;
 
     account_data.serialize(&mut *state_account.data.borrow_mut())?;
@@ -298,7 +347,7 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
         return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
     }
 
-    let seeds = &["state".as_bytes()];
+    let seeds = &[STATE_SEED.as_bytes()];
     let (account, _) = Pubkey::find_program_address(seeds, program_id);
 
     if state_account.key != &account {
@@ -313,6 +362,23 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
 
     let amount = 1;
     account_data.claim(amount)
+}
+
+pub fn initialize_hook(
+    token_program_id: &Pubkey,
+    mint_info: &AccountInfo,
+    authority: Option<Pubkey>,
+    transfer_hook_program_id: Option<Pubkey>,
+) -> ProgramResult {
+    invoke(
+        &spl_token_2022::extension::transfer_hook::instruction::initialize(
+            token_program_id,
+            mint_info.key,
+            authority,
+            transfer_hook_program_id,
+        )?,
+        &[mint_info.clone()],
+    )
 }
 
 // lib
