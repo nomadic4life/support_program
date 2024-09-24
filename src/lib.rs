@@ -14,11 +14,13 @@ use solana_program::{
     sysvar::Sysvar,
 };
 use spl_tlv_account_resolution::{account::ExtraAccountMeta, state::ExtraAccountMetaList};
+use spl_token::instruction::TokenInstruction;
 use spl_token_2022::{
-    instruction::{initialize_mint2, mint_to_checked},
+    instruction::{initialize_mint2, mint_to_checked, transfer_checked},
     state,
 };
 use spl_transfer_hook_interface::instruction::{ExecuteInstruction, TransferHookInstruction};
+use std::vec;
 
 const STATE_SEED: &str = "state";
 const TOKEN_MINT_SEED: &str = "token-mint";
@@ -66,6 +68,8 @@ pub fn process_instruction(
         },
     };
 
+    msg!("instruction: {:?}", instruction);
+
     match instruction {
         Instructions::Initialize => process_initialize(program_id, accounts),
         Instructions::InitializeExtraAccountMetaList => {
@@ -73,6 +77,7 @@ pub fn process_instruction(
         }
         Instructions::MintTokens => process_mint_tokens(program_id, accounts),
         Instructions::Claim => process_claim(program_id, accounts),
+        Instructions::TokenTransfer => process_transfer_token(program_id, accounts),
 
         // how to prevent anyone other than the token program to execute this instruction?
         Instructions::Execute { amount } => process_execute(program_id, accounts, amount),
@@ -80,11 +85,12 @@ pub fn process_instruction(
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub enum Instructions {
     Initialize,
     MintTokens,
     Claim,
+    TokenTransfer,
     Execute { amount: u64 },
     InitializeExtraAccountMetaList,
     UpdateExtraAccountMetaList,
@@ -231,38 +237,38 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     let accounts_iter = &mut accounts.iter();
 
     let signer = next_account_info(accounts_iter)?;
-    if !signer.is_signer {
-        return Err(ProgramError::Custom(
-            ErrorCode::AccountNeedsToBeSigner as u32,
-        ));
-    };
+    // if !signer.is_signer {
+    //     return Err(ProgramError::Custom(
+    //         ErrorCode::AccountNeedsToBeSigner as u32,
+    //     ));
+    // };
 
-    if !signer.is_writable {
-        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
-    }
+    // if !signer.is_writable {
+    //     return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    // }
 
     let state_account = next_account_info(accounts_iter)?;
-    if !state_account.is_writable {
-        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
-    }
+    // if !state_account.is_writable {
+    //     return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    // }
 
     let seeds = &[STATE_SEED.as_bytes()];
     let (account, state_bump) = Pubkey::find_program_address(seeds, program_id);
 
-    if state_account.key != &account {
-        return Err(ProgramError::Custom(ErrorCode::InvalidStateAccount as u32));
-    };
+    // if state_account.key != &account {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidStateAccount as u32));
+    // };
 
-    if !state_account.data_is_empty() {
-        return Err(ProgramError::Custom(
-            ErrorCode::AccountAlreadyIntialized as u32,
-        ));
-    }
+    // if !state_account.data_is_empty() {
+    //     return Err(ProgramError::Custom(
+    //         ErrorCode::AccountAlreadyIntialized as u32,
+    //     ));
+    // }
 
     let token_program = next_account_info(accounts_iter)?;
-    if !token_program.executable {
-        return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
-    }
+    // if !token_program.executable {
+    //     return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
+    // }
 
     // why this doesn't work?
     // if token_program.key == &spl_token_2022::ID {
@@ -270,29 +276,29 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     // }
 
     let token_mint = next_account_info(accounts_iter)?;
-    if !token_mint.is_writable {
-        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
-    }
+    // if !token_mint.is_writable {
+    //     return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    // }
 
     let seeds = &[TOKEN_MINT_SEED.as_bytes()];
     let (account, mint_bump) = Pubkey::find_program_address(seeds, program_id);
-    if token_mint.key != &account {
-        return Err(ProgramError::Custom(ErrorCode::InvalidTokenMint as u32));
-    };
+    // if token_mint.key != &account {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidTokenMint as u32));
+    // };
 
     let authority = next_account_info(accounts_iter)?;
 
     let seeds = &[TOKEN_AUTHORITY_SEED.as_bytes()];
     let (account, _) = Pubkey::find_program_address(seeds, program_id);
 
-    if authority.key != &account {
-        return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
-    };
+    // if authority.key != &account {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
+    // };
 
     let system_program = next_account_info(accounts_iter)?;
-    if !system_program.executable {
-        return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
-    }
+    // if !system_program.executable {
+    //     return Err(ProgramError::Custom(ErrorCode::AccountNotExecutable as u32));
+    // }
 
     // some reason I can't get this to work properly
     // if &solana_program::system_program::ID == system_program.key {
@@ -300,9 +306,9 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     // }
 
     // using system_program that is passed in, want to use from dependency, but doesn't work
-    if authority.owner != system_program.key {
-        return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
-    }
+    // if authority.owner != system_program.key {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
+    // }
 
     let clock = Clock::get()?;
 
@@ -502,13 +508,44 @@ pub fn process_mint_tokens(program_id: &Pubkey, accounts: &[AccountInfo]) -> Pro
     )
 }
 
-pub fn process_transfer_token(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
-    msg!("TOKEN TRANSFERED, IT WORKS!");
+pub fn process_transfer_token(_program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    // test cpi transfer from here to see if it works, but I am not sure
 
-    // if true {
-    //     return Err(ProgramError::Custom(1));
-    // }
-    Ok(())
+    let accounts_iter = &mut accounts.iter();
+
+    let authority = next_account_info(accounts_iter)?;
+    let source = next_account_info(accounts_iter)?;
+    let destination = next_account_info(accounts_iter)?;
+    let token_mint = next_account_info(accounts_iter)?;
+    let token_program = next_account_info(accounts_iter)?;
+
+    let hook_program = next_account_info(accounts_iter)?;
+    let meta_list = next_account_info(accounts_iter)?;
+
+    let amount = 1_000;
+    let decimals = 9;
+    let instruction = transfer_checked(
+        token_program.key,
+        source.key,
+        token_mint.key,
+        destination.key,
+        authority.key,
+        // probably not the best way to handle signer pubkeys, need to dynamically include them if any exist
+        &[],
+        amount,
+        decimals,
+    )?;
+
+    let account_infos = &[
+        source.clone(),
+        token_mint.clone(),
+        destination.clone(),
+        authority.clone(),
+        // hook_program.clone(),
+        meta_list.clone(),
+    ];
+
+    invoke(&instruction, account_infos)
 }
 
 // curently working on
@@ -534,6 +571,7 @@ pub fn process_execute(
     //  program escrow source -> receipent destenation
     //  final transaction
     //  anyone can execute transaction, done from program
+
     Ok(())
 }
 
@@ -543,6 +581,10 @@ pub fn fallback(
     _accounts: &[AccountInfo],
     _data: Option<Vec<ExtraAccountMeta>>,
 ) -> ProgramResult {
+    msg!("Is the fallback being executed?");
+    if true {
+        return Err(ProgramError::Custom(1));
+    }
     Ok(())
 }
 
