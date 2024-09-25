@@ -4,6 +4,7 @@ use solana_program::{
     clock::Clock,
     entrypoint,
     entrypoint::ProgramResult,
+    instruction::AccountMeta,
     msg,
     program::{invoke, invoke_signed},
     program_error::ProgramError,
@@ -14,7 +15,6 @@ use solana_program::{
     sysvar::Sysvar,
 };
 use spl_tlv_account_resolution::{account::ExtraAccountMeta, state::ExtraAccountMetaList};
-use spl_token::instruction::TokenInstruction;
 use spl_token_2022::{
     instruction::{initialize_mint2, mint_to_checked, transfer_checked},
     state,
@@ -524,7 +524,7 @@ pub fn process_transfer_token(_program_id: &Pubkey, accounts: &[AccountInfo]) ->
 
     let amount = 1_000;
     let decimals = 9;
-    let instruction = transfer_checked(
+    let mut instruction = transfer_checked(
         token_program.key,
         source.key,
         token_mint.key,
@@ -536,14 +536,23 @@ pub fn process_transfer_token(_program_id: &Pubkey, accounts: &[AccountInfo]) ->
         decimals,
     )?;
 
+    instruction
+        .accounts
+        .push(AccountMeta::new_readonly(hook_program.key.clone(), false));
+    instruction
+        .accounts
+        .push(AccountMeta::new_readonly(meta_list.key.clone(), false));
+
     let account_infos = &[
         source.clone(),
         token_mint.clone(),
         destination.clone(),
         authority.clone(),
-        // hook_program.clone(),
+        hook_program.clone(),
         meta_list.clone(),
     ];
+
+    msg!("{:?}", instruction);
 
     invoke(&instruction, account_infos)
 }
