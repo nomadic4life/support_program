@@ -30,6 +30,7 @@ const programId = new PublicKey("Bsygg6pgkUnupUAw1QcofEqUNEhYpkn7rZ3u3SUbDvAq");
 
 // compiled
 const tokenProgramId = new PublicKey("2fZZksM1597da76KCxn65gJ2qaqV99CiQ2ez3H9x6BdF");
+const ataProgramId = new PublicKey("Apzh48grAMTqjRsUsByD8SoE7gbTk9xNykZa4LAToP2Q");
 
 // spl-token
 // const tokenProgramId = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -257,8 +258,11 @@ const createTokenAccount = async (payer, owner, tokenMint) => {
         tokenMint,
         owner.publicKey,
         false,
-        TOKEN_2022_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID,
+        // TOKEN_2022_PROGRAM_ID,
+        tokenProgramId,
+        // ASSOCIATED_TOKEN_PROGRAM_ID,
+        ataProgramId,
+
     );
 
     const transaction = new Transaction({ ...latestBlockhash })
@@ -270,7 +274,8 @@ const createTokenAccount = async (payer, owner, tokenMint) => {
                 tokenMint,
                 // TOKEN_2022_PROGRAM_ID,
                 tokenProgramId,
-                ASSOCIATED_TOKEN_PROGRAM_ID
+                // ASSOCIATED_TOKEN_PROGRAM_ID,
+                ataProgramId,
             )
         );
 
@@ -496,6 +501,4 @@ const createMint = async () => {
 
 }
 
-// run()
-
-createMint()
+run()
