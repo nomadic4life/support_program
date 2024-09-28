@@ -3,3 +3,10 @@
 Cargo.lock
 /app/node_modules
 /app/yarn.lock
+
+~/target
+/solana_programs/main_program/target
+/solana_programs/main_program/test-ledger
+/solana_programs/token_hook_program/target
+/solana_programs/token_hook_program/test-ledger
+
