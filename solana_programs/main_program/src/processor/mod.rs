@@ -5,12 +5,16 @@ use solana_program::{
     clock::Clock,
     entrypoint::ProgramResult,
     msg,
-    program::invoke_signed,
+    program::{invoke, invoke_signed},
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
     system_instruction::create_account,
     sysvar::Sysvar,
+};
+use spl_token_2022::instruction::{
+    // mint_to_checked,
+    transfer_checked,
 };
 
 pub enum ErrorCode {
@@ -32,7 +36,7 @@ const STATE_SEED: &str = "state";
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub enum Instructions {
     Initialize,
-    Claim,
+    Claim { decimal: u8 },
     // MintTokens,
     // TokenTransfer,
     // Execute { amount: u64 },
@@ -130,11 +134,22 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     ProgramResult::Ok(())
 }
 
-pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo], decimal: u8) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
 
     let signer = next_account_info(accounts_iter)?;
+    let source = next_account_info(accounts_iter)?;
+    let _receiver = next_account_info(accounts_iter)?;
+
+    let _authority = next_account_info(accounts_iter)?;
     let state_account = next_account_info(accounts_iter)?;
+
+    let funding_escrow = next_account_info(accounts_iter)?;
+    let _pool_escrow = next_account_info(accounts_iter)?;
+
+    let token_mint = next_account_info(accounts_iter)?;
+    let token_program = next_account_info(accounts_iter)?;
+    let _token_hook_program = next_account_info(accounts_iter)?;
 
     if !signer.is_signer {
         return Err(ProgramError::Custom(
@@ -163,7 +178,39 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
         return Err(ProgramError::Custom(ErrorCode::InvalidAccountType as u32));
     }
 
-    let _trasnfer_amount = account_data.update()?;
+    let (amount, _claim_mint, _pool_mint) = account_data.update()?;
+
+    if amount > 0 {
+        let instruction = transfer_checked(
+            token_program.key,
+            source.key,
+            // token mint must be USDC
+            token_mint.key,
+            // desitnation is the funding vault | escrow
+            funding_escrow.key,
+            signer.key,
+            // probably not the best way to handle signer pubkeys, need to dynamically include them if any exist
+            &[],
+            amount,
+            decimal,
+        )?;
+
+        let account_infos = &[
+            source.clone(),
+            token_mint.clone(),
+            funding_escrow.clone(),
+            signer.clone(),
+        ];
+
+        invoke(&instruction, account_infos)?;
+    }
+
+    // if pool_mint > 0
+    // call token hook program to mint to pool escrow address
+
+    // call token hook program to mint to signer receiving address
 
     Ok(())
 }
+
+// process_take_pool

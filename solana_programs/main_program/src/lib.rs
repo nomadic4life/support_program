@@ -18,7 +18,7 @@ pub fn process_instruction(
 
     match instruction {
         Instructions::Initialize => process_initialize(program_id, accounts),
-        Instructions::Claim => process_claim(program_id, accounts),
+        Instructions::Claim { decimal } => process_claim(program_id, accounts, decimal),
     }
 }
 
