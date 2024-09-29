@@ -113,6 +113,8 @@ impl StateAccount {
 
         // don't remember what the accummulate depth is for?
         self.accummulated_depth += depth as u16;
+        self.total_claimed += StateAccount::CLAIM_MINT;
+        self.total_contributions += current_value;
 
         Ok((current_value, StateAccount::CLAIM_MINT, pool_mint))
     }

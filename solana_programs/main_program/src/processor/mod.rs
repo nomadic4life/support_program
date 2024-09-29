@@ -93,13 +93,18 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     let account_data = StateAccount {
         discriminator: StateAccount::DISCRIMINATOR as u8,
         bump: state_bump,
+
         prev_height: 0,
         last_height: 0,
         next_height: 0,
+        accummulated_depth: 0,
 
         last_value: 0,
         next_value: 0,
         last_slot: clock.slot,
+
+        total_claimed: 0,
+        total_contributions: 0,
     };
 
     let size = StateAccount::LEN;
@@ -158,8 +163,7 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
         return Err(ProgramError::Custom(ErrorCode::InvalidAccountType as u32));
     }
 
-    let amount = 1;
-    let _trasnfer_amount = account_data.claim(amount)?;
+    let _trasnfer_amount = account_data.update()?;
 
     Ok(())
 }
