@@ -1,2 +1,4 @@
 [workspace]
 members = ["solana_programs/token_hook_program", "solana_programs/main_program"]
+
+resolver = "2"
