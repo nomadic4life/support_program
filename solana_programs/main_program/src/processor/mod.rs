@@ -159,5 +159,7 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
     }
 
     let amount = 1;
-    account_data.claim(amount)
+    let _trasnfer_amount = account_data.claim(amount)?;
+
+    Ok(())
 }
