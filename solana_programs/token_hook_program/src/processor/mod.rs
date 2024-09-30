@@ -1,6 +1,7 @@
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
+    msg,
     program::{invoke, invoke_signed},
     program_pack::Pack,
     pubkey::Pubkey,
@@ -150,7 +151,7 @@ pub fn process_mint_tokens(
     let accounts_iter = &mut accounts.iter();
 
     // let _signer = next_account_info(accounts_iter)?;
-    let receipent = next_account_info(accounts_iter)?;
+    let destination = next_account_info(accounts_iter)?;
     let token_mint = next_account_info(accounts_iter)?;
     let authority = next_account_info(accounts_iter)?;
     let token_program = next_account_info(accounts_iter)?;
@@ -170,19 +171,21 @@ pub fn process_mint_tokens(
     //     return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
     // }
 
+    msg!("THIS WORKED BUT WILL IT WORK FOR TOKEN PROGRAM?");
+
     let decimals = 9;
     invoke(
         &mint_to_checked(
             token_program.key,
             token_mint.key,
-            receipent.key,
+            destination.key,
             // authority is the mint autority
             authority.key,
             &[],
             amount,
             decimals,
         )?,
-        &[token_mint.clone(), receipent.clone(), authority.clone()][..],
+        &[token_mint.clone(), destination.clone(), authority.clone()][..],
     )?;
 
     // invoke_signed(

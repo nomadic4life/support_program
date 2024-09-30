@@ -12,10 +12,10 @@ use solana_program::{
     system_instruction::create_account,
     sysvar::Sysvar,
 };
-use spl_token_2022::instruction::{
-    // mint_to_checked,
-    transfer_checked,
-};
+
+use token_hook_program::instruction::mint_to;
+
+const TOKEN_AUTHORITY_SEED: &str = "token-authority";
 
 pub enum ErrorCode {
     AccountNeedsToBeSigner,
@@ -36,12 +36,7 @@ const STATE_SEED: &str = "state";
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub enum Instructions {
     Initialize,
-    Claim { decimal: u8 },
-    // MintTokens,
-    // TokenTransfer,
-    // Execute { amount: u64 },
-    // InitializeExtraAccountMetaList,
-    // UpdateExtraAccountMetaList,
+    Claim,
 }
 
 pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
@@ -134,22 +129,25 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     ProgramResult::Ok(())
 }
 
-pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo], decimal: u8) -> ProgramResult {
+pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
 
     let signer = next_account_info(accounts_iter)?;
     let source = next_account_info(accounts_iter)?;
-    let _receiver = next_account_info(accounts_iter)?;
+    let receiver = next_account_info(accounts_iter)?;
 
-    let _authority = next_account_info(accounts_iter)?;
+    let authority = next_account_info(accounts_iter)?;
     let state_account = next_account_info(accounts_iter)?;
 
     let funding_escrow = next_account_info(accounts_iter)?;
-    let _pool_escrow = next_account_info(accounts_iter)?;
+    let pool_escrow = next_account_info(accounts_iter)?;
 
     let token_mint = next_account_info(accounts_iter)?;
+    let usdc_token_mint = next_account_info(accounts_iter)?;
+
     let token_program = next_account_info(accounts_iter)?;
-    let _token_hook_program = next_account_info(accounts_iter)?;
+    let usdc_token_program = next_account_info(accounts_iter)?;
+    let token_hook_program = next_account_info(accounts_iter)?;
 
     if !signer.is_signer {
         return Err(ProgramError::Custom(
@@ -178,11 +176,16 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo], decimal: u8)
         return Err(ProgramError::Custom(ErrorCode::InvalidAccountType as u32));
     }
 
-    let (amount, _claim_mint, _pool_mint) = account_data.update()?;
+    let (amount, claim_mint, pool_mint) = account_data.update()?;
+
+    // testing
+    let amount = 1_000_000;
+    let pool_mint = 10_000_000_000;
 
     if amount > 0 {
-        let instruction = transfer_checked(
-            token_program.key,
+        let decimals = 6;
+        let instruction = spl_token::instruction::transfer_checked(
+            usdc_token_program.key,
             source.key,
             // token mint must be USDC
             token_mint.key,
@@ -192,7 +195,7 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo], decimal: u8)
             // probably not the best way to handle signer pubkeys, need to dynamically include them if any exist
             &[],
             amount,
-            decimal,
+            decimals,
         )?;
 
         let account_infos = &[
@@ -205,12 +208,98 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo], decimal: u8)
         invoke(&instruction, account_infos)?;
     }
 
-    // if pool_mint > 0
-    // call token hook program to mint to pool escrow address
+    let seeds = &[TOKEN_AUTHORITY_SEED.as_bytes()];
+    let (_account, bump) = Pubkey::find_program_address(seeds, program_id);
 
-    // call token hook program to mint to signer receiving address
+    if pool_mint > 0 {
+        invoke_signed(
+            &mint_to(
+                token_hook_program.key,
+                token_program.key,
+                usdc_token_mint.key,
+                authority.key,
+                pool_escrow.key,
+                pool_mint,
+            )?,
+            &[
+                // account infos
+                token_mint.clone(),
+                pool_escrow.clone(),
+                authority.clone(),
+            ],
+            &[&[TOKEN_AUTHORITY_SEED.as_bytes(), &[bump][..]]],
+        )?;
+    }
+
+    invoke_signed(
+        // mint_token
+        &mint_to(
+            token_hook_program.key,
+            token_program.key,
+            token_mint.key,
+            authority.key,
+            receiver.key,
+            claim_mint,
+        )?,
+        &[
+            // account infos
+            token_mint.clone(),
+            pool_escrow.clone(),
+            authority.clone(),
+        ],
+        &[&[TOKEN_AUTHORITY_SEED.as_bytes(), &[bump][..]]],
+    )?;
 
     Ok(())
 }
 
+// code will be used in process_cliam
+// pub fn process_transfer_token(_program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+//     // test cpi transfer from here to see if it works, but I am not sure
+
+//     let accounts_iter = &mut accounts.iter();
+
+//     let authority = next_account_info(accounts_iter)?;
+//     let source = next_account_info(accounts_iter)?;
+//     let destination = next_account_info(accounts_iter)?;
+//     let token_mint = next_account_info(accounts_iter)?;
+//     let token_program = next_account_info(accounts_iter)?;
+
+//     let hook_program = next_account_info(accounts_iter)?;
+//     let meta_list = next_account_info(accounts_iter)?;
+
+//     let amount = 1_000;
+//     let decimals = 9;
+//     let mut instruction = transfer_checked(
+//         token_program.key,
+//         source.key,
+//         token_mint.key,
+//         destination.key,
+//         authority.key,
+//         // probably not the best way to handle signer pubkeys, need to dynamically include them if any exist
+//         &[],
+//         amount,
+//         decimals,
+//     )?;
+
+//     instruction
+//         .accounts
+//         .push(AccountMeta::new_readonly(hook_program.key.clone(), false));
+//     instruction
+//         .accounts
+//         .push(AccountMeta::new_readonly(meta_list.key.clone(), false));
+
+//     let account_infos = &[
+//         source.clone(),
+//         token_mint.clone(),
+//         destination.clone(),
+//         authority.clone(),
+//         hook_program.clone(),
+//         meta_list.clone(),
+//     ];
+
+//     msg!("{:?}", instruction);
+
+//     invoke(&instruction, account_infos)
+// }
 // process_take_pool

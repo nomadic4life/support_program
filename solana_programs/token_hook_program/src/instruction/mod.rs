@@ -32,24 +32,23 @@ impl TokenInstruction {
 }
 
 pub fn mint_to(
+    token_hook_program_id: &Pubkey,
     token_program_id: &Pubkey,
-    mint_pubkey: &Pubkey,
-    account_pubkey: &Pubkey,
-    owner_pubkey: &Pubkey,
-    // token_mint: &AccountInfo,
-    // receipent: &AccountInfo,
-    // authority: &AccountInfo,
+    token_mint_pubkey: &Pubkey,
+    mint_authority_pubkey: &Pubkey,
+    destination_pubkey: &Pubkey,
     amount: u64,
 ) -> Result<Instruction, ProgramError> {
     let data = TokenInstruction::MintTo { amount }.pack();
 
-    let mut accounts = Vec::with_capacity(3);
-    accounts.push(AccountMeta::new(*mint_pubkey, false));
-    accounts.push(AccountMeta::new(*account_pubkey, false));
-    accounts.push(AccountMeta::new_readonly(*owner_pubkey, true));
+    let mut accounts = Vec::with_capacity(4);
+    accounts.push(AccountMeta::new(*destination_pubkey, false));
+    accounts.push(AccountMeta::new(*token_mint_pubkey, false));
+    accounts.push(AccountMeta::new_readonly(*mint_authority_pubkey, true));
+    accounts.push(AccountMeta::new_readonly(*token_program_id, false));
 
     Ok(Instruction {
-        program_id: *token_program_id,
+        program_id: *token_hook_program_id,
         accounts,
         data,
     })
