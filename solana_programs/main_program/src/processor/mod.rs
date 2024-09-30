@@ -7,15 +7,18 @@ use solana_program::{
     msg,
     program::{invoke, invoke_signed},
     program_error::ProgramError,
+    program_pack::Pack,
     pubkey::Pubkey,
     rent::Rent,
     system_instruction::create_account,
     sysvar::Sysvar,
 };
-
+use spl_token_2022::{extension::ExtensionType, state::Account};
 use token_hook_program::instruction::mint_to;
 
 const TOKEN_AUTHORITY_SEED: &str = "token-authority";
+const FUND_ESCROW_SEED: &str = "fund-escrow";
+const POOL_ESCROW_SEED: &str = "pool-escrow";
 
 pub enum ErrorCode {
     AccountNeedsToBeSigner,
@@ -44,10 +47,26 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
 
     let signer = next_account_info(accounts_iter)?;
     let state_account = next_account_info(accounts_iter)?;
+    let fund_escrow = next_account_info(accounts_iter)?;
+    let pool_escrow = next_account_info(accounts_iter)?;
+    let usdc_token_mint = next_account_info(accounts_iter)?;
+    let token_mint = next_account_info(accounts_iter)?;
+    let usdc_token_program = next_account_info(accounts_iter)?;
+    let token_program = next_account_info(accounts_iter)?;
+    let authority = next_account_info(accounts_iter)?;
     let _system_program = next_account_info(accounts_iter)?;
 
     let seeds = &[STATE_SEED.as_bytes()];
     let (_pubkey, state_bump) = Pubkey::find_program_address(seeds, program_id);
+
+    let seeds = &[FUND_ESCROW_SEED.as_bytes()];
+    let (_pubkey, fund_bump) = Pubkey::find_program_address(seeds, program_id);
+
+    let seeds = &[POOL_ESCROW_SEED.as_bytes()];
+    let (_pubkey, pool_bump) = Pubkey::find_program_address(seeds, program_id);
+
+    let seeds: &[&[u8]; 1] = &[TOKEN_AUTHORITY_SEED.as_bytes()];
+    let (_pubkey, _authority_bump) = Pubkey::find_program_address(seeds, program_id);
 
     // if state_account.key != &account {
     //     return Err(ProgramError::Custom(ErrorCode::InvalidStateAccount as u32));
@@ -87,7 +106,77 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
     //     return Err(ProgramError::Custom(ErrorCode::InvalidMintAuthority as u32));
     // }
 
-    let clock = Clock::get()?;
+    // create fund escrow -> initialize
+    let size = spl_token::state::Account::LEN;
+    let lamports = (Rent::get()?).minimum_balance(size);
+    invoke_signed(
+        &create_account(
+            signer.key,
+            fund_escrow.key,
+            lamports,
+            size as u64,
+            usdc_token_program.key,
+        ),
+        &[signer.clone(), fund_escrow.clone()],
+        &[&[FUND_ESCROW_SEED.as_bytes(), &[fund_bump]]],
+    )?;
+
+    invoke(
+        &spl_token::instruction::initialize_account3(
+            usdc_token_program.key,
+            fund_escrow.key,
+            usdc_token_mint.key,
+            authority.key,
+        )?,
+        &[fund_escrow.clone(), usdc_token_mint.clone()],
+    )?;
+
+    // create pool escrow -> initialize
+    let size =
+        ExtensionType::try_calculate_account_len::<Account>(&[ExtensionType::TransferHookAccount])?;
+    let lamports = (Rent::get()?).minimum_balance(size);
+    invoke_signed(
+        &create_account(
+            signer.key,
+            pool_escrow.key,
+            lamports,
+            size as u64,
+            token_program.key,
+        ),
+        &[signer.clone(), pool_escrow.clone()],
+        &[&[POOL_ESCROW_SEED.as_bytes(), &[pool_bump]]],
+    )?;
+
+    invoke(
+        &spl_token_2022::instruction::initialize_account3(
+            token_program.key,
+            pool_escrow.key,
+            token_mint.key,
+            authority.key,
+        )?,
+        &[
+            pool_escrow.clone(),
+            token_mint.clone(),
+            token_program.clone(),
+            authority.clone(),
+            signer.clone(),
+        ],
+    )?;
+
+    // create the state -> initialize
+    let size = StateAccount::LEN;
+    let lamports = (Rent::get()?).minimum_balance(size);
+    invoke_signed(
+        &create_account(
+            signer.key,
+            state_account.key,
+            lamports,
+            size as u64,
+            program_id,
+        ),
+        &[signer.clone(), state_account.clone()],
+        &[&[STATE_SEED.as_bytes(), &[state_bump]]],
+    )?;
 
     let account_data = StateAccount {
         discriminator: StateAccount::DISCRIMINATOR as u8,
@@ -100,27 +189,11 @@ pub fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> Prog
 
         last_value: 0,
         next_value: 0,
-        last_slot: clock.slot,
+        last_slot: (Clock::get()?).slot,
 
         total_claimed: 0,
         total_contributions: 0,
     };
-
-    let size = StateAccount::LEN;
-    let lamports = (Rent::get()?).minimum_balance(size);
-
-    // create the state account
-    invoke_signed(
-        &create_account(
-            signer.key,
-            state_account.key,
-            lamports,
-            size as u64,
-            program_id,
-        ),
-        &[signer.clone(), state_account.clone()],
-        &[&[STATE_SEED.as_bytes(), &[state_bump]]],
-    )?;
 
     account_data.serialize(&mut *state_account.data.borrow_mut())?;
 
@@ -139,7 +212,7 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
     let authority = next_account_info(accounts_iter)?;
     let state_account = next_account_info(accounts_iter)?;
 
-    let funding_escrow = next_account_info(accounts_iter)?;
+    let fund_escrow = next_account_info(accounts_iter)?;
     let pool_escrow = next_account_info(accounts_iter)?;
 
     let token_mint = next_account_info(accounts_iter)?;
@@ -184,28 +257,27 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
 
     if amount > 0 {
         let decimals = 6;
-        let instruction = spl_token::instruction::transfer_checked(
-            usdc_token_program.key,
-            source.key,
-            // token mint must be USDC
-            token_mint.key,
-            // desitnation is the funding vault | escrow
-            funding_escrow.key,
-            signer.key,
-            // probably not the best way to handle signer pubkeys, need to dynamically include them if any exist
-            &[],
-            amount,
-            decimals,
+        invoke(
+            &spl_token::instruction::transfer_checked(
+                usdc_token_program.key,
+                source.key,
+                // token mint must be USDC
+                usdc_token_mint.key,
+                // desitnation is the fund vault | escrow
+                fund_escrow.key,
+                signer.key,
+                // probably not the best way to handle signer pubkeys, need to dynamically include them if any exist
+                &[],
+                amount,
+                decimals,
+            )?,
+            &[
+                source.clone(),
+                token_mint.clone(),
+                fund_escrow.clone(),
+                signer.clone(),
+            ],
         )?;
-
-        let account_infos = &[
-            source.clone(),
-            token_mint.clone(),
-            funding_escrow.clone(),
-            signer.clone(),
-        ];
-
-        invoke(&instruction, account_infos)?;
     }
 
     let seeds = &[TOKEN_AUTHORITY_SEED.as_bytes()];
@@ -216,7 +288,7 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
             &mint_to(
                 token_hook_program.key,
                 token_program.key,
-                usdc_token_mint.key,
+                token_mint.key,
                 authority.key,
                 pool_escrow.key,
                 pool_mint,

@@ -12,7 +12,6 @@ import {
 } from "@solana/web3.js";
 
 import {
-    // getOrCreateAssociatedTokenAccount,
     getAssociatedTokenAddressSync,
     createAssociatedTokenAccountInstruction,
     createTransferCheckedWithTransferHookInstruction,
@@ -25,6 +24,7 @@ import {
     getOrCreateAssociatedTokenAccount,
     mintTo,
     createAccount,
+    createInitializeAccount3Instruction,
 } from "@solana/spl-token";
 
 const programId = new PublicKey("CFJr1PdpkQTkdET2utARRc5kJnQgkKyMEdGHbUg85VtS");
@@ -46,13 +46,13 @@ const run = async () => {
         Buffer.from("state")
     ], programId);
 
-    // const [tokenAuthority] = PublicKey.findProgramAddressSync([
-    //     Buffer.from("token-authority")
-    // ], programId);
+    const [fundEscrow] = PublicKey.findProgramAddressSync([
+        Buffer.from("fund-escrow")
+    ], programId);
 
-    // const [tokenAuthority] = PublicKey.findProgramAddressSync([
-    //     Buffer.from("token-authority")
-    // ], programId);
+    const [poolEscrow] = PublicKey.findProgramAddressSync([
+        Buffer.from("pool-escrow")
+    ], programId);
 
     const [tokenAuthority] = PublicKey.findProgramAddressSync([
         Buffer.from("token-authority")
@@ -105,100 +105,122 @@ const run = async () => {
     await initProgram(
         keypair,
         stateAccount,
+        fundEscrow,
+        poolEscrow,
+
+        tokenAuthority,
+        tokenMint,
+        usdcTokenMint,
     );
+
+    console.log("HERE A")
 
     const tokenAccounts = await Promise.all([
         new Promise(async (resolve, reject) => {
-            let usdcTokenAddress = await getOrCreateAssociatedTokenAccount(
-                connection,
-                keypair,
-                usdcTokenMint,
-                user1.publicKey
-            );
 
-            let tokenAddress = await createTokenAccount(
-                keypair,
-                user1,
-                tokenMint,
-            )
+            try {
+                let usdcTokenAddress = await getOrCreateAssociatedTokenAccount(
+                    connection,
+                    keypair,
+                    usdcTokenMint,
+                    user1.publicKey,
+                    false,
+                    "finalized",
+                    {
+                        commitment: "finalized"
+                    },
+                    TOKEN_PROGRAM_ID,
+                    ASSOCIATED_TOKEN_PROGRAM_ID,
+                );
 
-            await mintTo(
-                connection,
-                keypair,
-                usdcTokenMint,
-                usdcTokenAddress,
-                keypair,
-                10_000_000,
-            );
+                let tokenAddress = await createTokenAccount(
+                    keypair,
+                    user1,
+                    tokenMint,
+                )
 
-            resolve({
-                usdcTokenAddress, tokenAddress, user: user1
-            })
+                await mintTo(
+                    connection,
+                    keypair,
+                    usdcTokenMint,
+                    usdcTokenAddress.address,
+                    keypair,
+                    10_000_000,
+                    [],
+                    {
+                        commitment: "finalized"
+                    },
+                    TOKEN_PROGRAM_ID,
+                );
+
+                resolve({
+                    usdcTokenAddress: usdcTokenAddress.address, tokenAddress, user: user1
+                })
+
+            } catch (err) {
+                console.log(err)
+                reject()
+            }
         }),
 
         new Promise(async (resolve, reject) => {
 
-            let usdcTokenAddress = await getOrCreateAssociatedTokenAccount(
-                connection,
-                keypair,
-                usdcTokenMint,
-                user2.publicKey
-            );
+            try {
+                let usdcTokenAddress = await getOrCreateAssociatedTokenAccount(
+                    connection,
+                    keypair,
+                    usdcTokenMint,
+                    user2.publicKey,
+                    false,
+                    "finalized",
+                    {
+                        commitment: "finalized"
+                    },
+                    TOKEN_PROGRAM_ID,
+                    ASSOCIATED_TOKEN_PROGRAM_ID,
+                );
 
-            let tokenAddress = await createTokenAccount(
-                keypair,
-                user2,
-                tokenMint,
-            )
+                let tokenAddress = await createTokenAccount(
+                    keypair,
+                    user2,
+                    tokenMint,
+                )
 
-            await mintTo(
-                connection,
-                keypair,
-                usdcTokenMint,
-                usdcTokenAddress,
-                keypair,
-                10_000_000,
-            );
+                await mintTo(
+                    connection,
+                    keypair,
+                    usdcTokenMint,
+                    usdcTokenAddress.address,
+                    keypair,
+                    10_000_000,
+                    [],
+                    {
+                        commitment: "finalized"
+                    },
+                    TOKEN_PROGRAM_ID,
+                );
 
-            resolve({
-                usdcTokenAddress, tokenAddress, user: user2
-            })
+                resolve({
+                    usdcTokenAddress: usdcTokenAddress.address, tokenAddress, user: user2
+                })
+            } catch (err) {
+                console.log(err)
+                reject()
+            }
         }),
     ]);
 
-    // const escrowAccounts = await Promise.all([
-    //     new Promise(async (resolve) => {
-    //         await createAccount(
-    //             connection,
-    //             keypair,
-    //             usdcTokenMint,
-    //             owner,
-    //             Keypair.generate(),
-    //             {
-    //                 commitment: "finalized",
-    //             },
-    //             TOKEN_PROGRAM_ID,
-    //         );
+    console.log("HERE B")
 
-    //         resolve();
-    //     }),
+    // await createEscrows(
+    //     keypair,
+    //     tokenAuthority,
+    //     fundEscrow,
+    //     poolEscrow,
 
-    //     new Promise(async (resolve) => {
-    //         await createAccount(
-    //             connection,
-    //             keypair,
-    //             usdcTokenMint,
-    //             owner,
-    //             Keypair.generate(),
-    //             {
-    //                 commitment: "finalized",
-    //             },
-    //             TOKEN_2022_PROGRAM_ID,
-    //         );
-
-    //         resolve();
-    //     })
-    // ])
+    //     usdcTokenMint,
+    //     tokenMint,
+    // );
 
 
     await claim(
@@ -208,7 +230,7 @@ const run = async () => {
 
         stateAccount,
 
-        fundingEscrow,
+        fundEscrow,
         poolEscrow,
 
         tokenAuthority,
@@ -248,6 +270,12 @@ const run = async () => {
 const initProgram = async (
     payer,
     stateAccount,
+    fundEscrow,
+    poolEscrow,
+
+    authority,
+    tokenMint,
+    usdcTokenMint,
 ) => {
     const latestBlockhash = await connection.getLatestBlockhash();
     const instruction = new TransactionInstruction({
@@ -263,6 +291,42 @@ const initProgram = async (
                 isWritable: true,
                 pubkey: stateAccount,
             },
+
+            {
+                isSigner: false,
+                isWritable: true,
+                pubkey: fundEscrow,
+            },
+            {
+                isSigner: false,
+                isWritable: true,
+                pubkey: poolEscrow,
+            },
+            {
+                isSigner: false,
+                isWritable: false,
+                pubkey: usdcTokenMint,
+            },
+            {
+                isSigner: false,
+                isWritable: false,
+                pubkey: tokenMint,
+            },
+            {
+                isSigner: false,
+                isWritable: false,
+                pubkey: TOKEN_PROGRAM_ID,
+            },
+            {
+                isSigner: false,
+                isWritable: false,
+                pubkey: TOKEN_2022_PROGRAM_ID,
+            },
+            {
+                isSigner: false,
+                isWritable: false,
+                pubkey: authority,
+            },
             {
                 isSigner: false,
                 isWritable: false,
@@ -274,7 +338,13 @@ const initProgram = async (
 
     const transaction = new Transaction({ ...latestBlockhash });
     transaction.add(instruction);
-    transaction.sign(payer);
+    // transaction.sign(payer);
+
+    console.log(transaction)
+    console.log(transaction.instructions)
+    console.log(transaction.instructions.keys)
+
+
 
 
     let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
@@ -332,32 +402,32 @@ const claim = async (
             },
             {
                 isSigner: false,
-                isWritable: true,
+                isWritable: false,
                 pubkey: tokenAuthority,
             },
             {
                 isSigner: false,
-                isWritable: true,
+                isWritable: false,
                 pubkey: tokenMint,
             },
             {
                 isSigner: false,
-                isWritable: true,
+                isWritable: false,
                 pubkey: usdcTokenMint,
             },
             {
                 isSigner: false,
-                isWritable: true,
+                isWritable: false,
                 pubkey: TOKEN_2022_PROGRAM_ID,
             },
             {
                 isSigner: false,
-                isWritable: true,
+                isWritable: false,
                 pubkey: TOKEN_PROGRAM_ID,
             },
             {
                 isSigner: false,
-                isWritable: true,
+                isWritable: false,
                 pubkey: tokenHookProgramId,
             },
             {
@@ -379,7 +449,6 @@ const claim = async (
     });
     console.log({ name: "claim -> mint", sig });
 }
-
 
 const init = async (
     payer,
@@ -510,6 +579,43 @@ const createTokenAccount = async (payer, owner, tokenMint) => {
     console.log({ name: 'token account', sig, response });
 
     return associatedToken
+}
+
+const createEscrows = async (
+    payer,
+    authority,
+    fundEscrow,
+    poolEscrow,
+
+    usdcTokenMint,
+    tokenMint,
+) => {
+
+    const latestBlockhash = await connection.getLatestBlockhash();
+    const transaction = new Transaction({ ...latestBlockhash });
+    transaction.add(
+        createInitializeAccount3Instruction(
+            fundEscrow,
+            usdcTokenMint,
+            authority,
+            // payer.publicKey,
+            TOKEN_PROGRAM_ID,
+        ),
+
+        createInitializeAccount3Instruction(
+            poolEscrow,
+            tokenMint,
+            authority,
+            TOKEN_2022_PROGRAM_ID,
+        )
+    );
+
+    console.log(transaction.instructions.keys)
+
+    let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
+        commitment: "finalized",
+    });
+    console.log({ name: 'create escrows', sig })
 }
 
 
@@ -709,7 +815,7 @@ const program_transfer = async (
     console.log({ name: 'mint tokens', sig })
 }
 
-const createMint = async () => {
+const createProgramMint = async () => {
 
     let instruction = createInitializeMint2Instruction(
         Keypair.generate().publicKey,
