@@ -28,7 +28,7 @@ fn process_instruction(
 
     let (instruction, _data) = match code {
         // Normal Instructions
-        0 => (Instructions::try_from_slice(&[instruction_data[8]])?, None),
+        0 => (Instructions::try_from_slice(&instruction_data[8..])?, None),
 
         // Transfer Hook Instructions
         _ => match TransferHookInstruction::unpack(instruction_data)? {

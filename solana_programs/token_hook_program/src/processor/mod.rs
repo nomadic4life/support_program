@@ -171,8 +171,6 @@ pub fn process_mint_tokens(
     //     return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
     // }
 
-    msg!("THIS WORKED BUT WILL IT WORK FOR TOKEN PROGRAM?");
-
     let decimals = 9;
     invoke(
         &mint_to_checked(
@@ -185,7 +183,7 @@ pub fn process_mint_tokens(
             amount,
             decimals,
         )?,
-        &[token_mint.clone(), destination.clone(), authority.clone()][..],
+        &[token_mint.clone(), destination.clone(), authority.clone()],
     )?;
 
     // invoke_signed(

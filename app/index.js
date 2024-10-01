@@ -27,8 +27,8 @@ import {
     createInitializeAccount3Instruction,
 } from "@solana/spl-token";
 
-const programId = new PublicKey("CFJr1PdpkQTkdET2utARRc5kJnQgkKyMEdGHbUg85VtS");
-const tokenHookProgramId = new PublicKey("ZxyJ96Yj2bYDSj2GdWF696TyJ7L4rk1VSz3mkAwwZAR");
+const programId = new PublicKey("48JmqKNmWt27kX9VoUga8XREE5obnDBNuzBHbRCSXyVR");
+const tokenHookProgramId = new PublicKey("DayH1wsDPCF6Znnpe4CWoEKJSVYstQvbMYPNkJETMhCM");
 
 // ---------------------
 
@@ -76,7 +76,6 @@ const run = async () => {
         ...latestBlockhash,
     });
 
-    // create usdc token mint
     const usdcTokenMint = await createMint(
         connection,
         keypair,
@@ -107,13 +106,10 @@ const run = async () => {
         stateAccount,
         fundEscrow,
         poolEscrow,
-
         tokenAuthority,
         tokenMint,
         usdcTokenMint,
     );
-
-    console.log("HERE A")
 
     const tokenAccounts = await Promise.all([
         new Promise(async (resolve, reject) => {
@@ -210,61 +206,17 @@ const run = async () => {
         }),
     ]);
 
-    console.log("HERE B")
-
-    // await createEscrows(
-    //     keypair,
-    //     tokenAuthority,
-    //     fundEscrow,
-    //     poolEscrow,
-
-    //     usdcTokenMint,
-    //     tokenMint,
-    // );
-
-
     await claim(
         tokenAccounts[0].user,
         tokenAccounts[0].usdcTokenAddress,
         tokenAccounts[0].tokenAddress,
-
         stateAccount,
-
+        tokenAuthority,
         fundEscrow,
         poolEscrow,
-
-        tokenAuthority,
         tokenMint,
         usdcTokenMint,
     );
-
-
-    // await mintTokens(
-    //     keypair,
-    //     tokenAccounts[0].tokenAddress,
-    //     tokenAuthority,
-    //     tokenMint,
-    // );
-
-    // await transfer_token(
-    //     connection,
-    //     tokenAccounts[0].tokenAddress,
-    //     tokenMint,
-    //     tokenAccounts[1].tokenAddress,
-    //     tokenAccounts[0].user,
-    //     BigInt(1_000_000_000),
-    //     9,
-    // );
-
-    // await program_transfer(
-    //     tokenAccounts[0].user,
-    //     tokenAccounts[0].tokenAddress,
-    //     tokenAccounts[1].tokenAddress,
-    //     tokenMint,
-    //     programId,
-    //     metaList,
-    // );
-
 }
 
 const initProgram = async (
@@ -338,14 +290,6 @@ const initProgram = async (
 
     const transaction = new Transaction({ ...latestBlockhash });
     transaction.add(instruction);
-    // transaction.sign(payer);
-
-    console.log(transaction)
-    console.log(transaction.instructions)
-    console.log(transaction.instructions.keys)
-
-
-
 
     let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
         commitment: "finalized",
@@ -358,11 +302,9 @@ const claim = async (
     source,
     receiver,
     stateAccount,
-
-    fundingEscrow,
-    poolEscrow,
-
     tokenAuthority,
+    fundEscrow,
+    poolEscrow,
     tokenMint,
     usdcTokenMint,
 ) => {
@@ -387,13 +329,18 @@ const claim = async (
             },
             {
                 isSigner: false,
+                isWritable: false,
+                pubkey: tokenAuthority,
+            },
+            {
+                isSigner: false,
                 isWritable: true,
                 pubkey: stateAccount,
             },
             {
                 isSigner: false,
                 isWritable: true,
-                pubkey: fundingEscrow,
+                pubkey: fundEscrow,
             },
             {
                 isSigner: false,
@@ -402,12 +349,7 @@ const claim = async (
             },
             {
                 isSigner: false,
-                isWritable: false,
-                pubkey: tokenAuthority,
-            },
-            {
-                isSigner: false,
-                isWritable: false,
+                isWritable: true,
                 pubkey: tokenMint,
             },
             {
@@ -441,8 +383,6 @@ const claim = async (
 
     const transaction = new Transaction({ ...latestBlockhash });
     transaction.add(instruction);
-    transaction.sign(signer);
-
 
     let sig = await sendAndConfirmTransaction(connection, transaction, [signer], {
         commitment: "finalized",
@@ -490,8 +430,6 @@ const init = async (
 
     const transaction = new Transaction({ ...latestBlockhash });
     transaction.add(instruction);
-    transaction.sign(payer);
-
 
     let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
         commitment: "finalized",
@@ -534,8 +472,6 @@ const createMetaList = async (
 
     const transaction = new Transaction({ ...latestBlockhash });
     transaction.add(instruction);
-    transaction.sign(payer);
-
 
     let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
         commitment: "finalized",
@@ -574,12 +510,11 @@ const createTokenAccount = async (payer, owner, tokenMint) => {
     let sig = await sendAndConfirmTransaction(connection, transaction, [payer], {
         commitment: "finalized",
     });
-
-
     console.log({ name: 'token account', sig, response });
 
     return associatedToken
 }
+
 
 const createEscrows = async (
     payer,
@@ -617,7 +552,6 @@ const createEscrows = async (
     });
     console.log({ name: 'create escrows', sig })
 }
-
 
 const mintTokens = async (
     payer,

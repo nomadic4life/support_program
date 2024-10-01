@@ -23,7 +23,8 @@ impl TokenInstruction {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match self {
             &Self::MintTo { amount } => {
-                buf.push(0);
+                buf.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+                buf.push(1);
                 buf.extend_from_slice(&amount.to_le_bytes());
             }
         };

@@ -222,38 +222,34 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
     let usdc_token_program = next_account_info(accounts_iter)?;
     let token_hook_program = next_account_info(accounts_iter)?;
 
-    if !signer.is_signer {
-        return Err(ProgramError::Custom(
-            ErrorCode::AccountNeedsToBeSigner as u32,
-        ));
-    };
+    // if !signer.is_signer {
+    //     return Err(ProgramError::Custom(
+    //         ErrorCode::AccountNeedsToBeSigner as u32,
+    //     ));
+    // };
 
-    if !signer.is_writable {
-        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
-    }
+    // if !signer.is_writable {
+    //     return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    // }
 
-    if !state_account.is_writable {
-        return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
-    }
+    // if !state_account.is_writable {
+    //     return Err(ProgramError::Custom(ErrorCode::Immutable as u32));
+    // }
 
     let seeds = &[STATE_SEED.as_bytes()];
-    let (account, _) = Pubkey::find_program_address(seeds, program_id);
+    let (_account, _) = Pubkey::find_program_address(seeds, program_id);
 
-    if state_account.key != &account {
-        return Err(ProgramError::Custom(ErrorCode::InvalidStateAccount as u32));
-    };
+    // if state_account.key != &account {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidStateAccount as u32));
+    // };
 
     let mut account_data = StateAccount::try_from_slice(&mut *state_account.data.borrow_mut())?;
 
-    if account_data.discriminator != StateAccount::DISCRIMINATOR as u8 {
-        return Err(ProgramError::Custom(ErrorCode::InvalidAccountType as u32));
-    }
+    // if account_data.discriminator != StateAccount::DISCRIMINATOR as u8 {
+    //     return Err(ProgramError::Custom(ErrorCode::InvalidAccountType as u32));
+    // }
 
     let (amount, claim_mint, pool_mint) = account_data.update()?;
-
-    // testing
-    let amount = 1_000_000;
-    let pool_mint = 10_000_000_000;
 
     if amount > 0 {
         let decimals = 6;
@@ -273,7 +269,7 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
             )?,
             &[
                 source.clone(),
-                token_mint.clone(),
+                usdc_token_mint.clone(),
                 fund_escrow.clone(),
                 signer.clone(),
             ],
@@ -293,18 +289,12 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
                 pool_escrow.key,
                 pool_mint,
             )?,
-            &[
-                // account infos
-                token_mint.clone(),
-                pool_escrow.clone(),
-                authority.clone(),
-            ],
+            &[token_mint.clone(), pool_escrow.clone(), authority.clone()],
             &[&[TOKEN_AUTHORITY_SEED.as_bytes(), &[bump][..]]],
         )?;
     }
 
     invoke_signed(
-        // mint_token
         &mint_to(
             token_hook_program.key,
             token_program.key,
@@ -313,12 +303,7 @@ pub fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramRe
             receiver.key,
             claim_mint,
         )?,
-        &[
-            // account infos
-            token_mint.clone(),
-            pool_escrow.clone(),
-            authority.clone(),
-        ],
+        &[receiver.clone(), token_mint.clone(), authority.clone()],
         &[&[TOKEN_AUTHORITY_SEED.as_bytes(), &[bump][..]]],
     )?;
 
